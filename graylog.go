@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"net"
 	"time"
-
-	"github.com/Jeffail/gabs"
+	// "github.com/Jeffail/gabs"
 )
 
 // Transport represents a transport type enum
@@ -33,13 +32,13 @@ type Graylog struct {
 
 // Message represents a GELF formated message
 type Message struct {
-	Version      string            `json:"version"`
-	Host         string            `json:"host"`
-	ShortMessage string            `json:"short_message"`
-	FullMessage  string            `json:"full_message,omitempty"`
-	Timestamp    int64             `json:"timestamp,omitempty"`
-	Level        uint              `json:"level,omitempty"`
-	Extra        map[string]string `json:"-"`
+	Version      string                 `json:"version"`
+	Host         string                 `json:"host"`
+	ShortMessage string                 `json:"short_message"`
+	FullMessage  string                 `json:"full_message,omitempty"`
+	Timestamp    int64                  `json:"timestamp,omitempty"`
+	Level        uint                   `json:"level,omitempty"`
+	Extra        map[string]interface{} `json:"-,"`
 }
 
 // NewGraylog instanciates a new graylog connection using the given endpoint
@@ -98,29 +97,38 @@ func (g *Graylog) Close() error {
 
 // prepareMessage marshal the given message, add extra fields and append EOL symbols
 func prepareMessage(m Message) ([]byte, error) {
-	// Marshal the GELF message in order to get base JSON
-	jsonMessage, err := json.Marshal(m)
-	if err != nil {
-		return []byte{}, err
-	}
 
-	// Parse JSON in order to dynamically edit it
-	c, err := gabs.ParseJSON(jsonMessage)
-	if err != nil {
-		return []byte{}, err
+	t := map[string]interface{}{
+		"version":       m.Version,
+		"host":          m.Host,
+		"short_message": m.ShortMessage,
 	}
-
-	// Loop on extra fields and inject them into JSON
+	if m.Timestamp != 0 {
+		t["timestamp"] = m.Timestamp
+	}
+	if m.FullMessage != "" {
+		t["full_message"] = m.FullMessage
+	}
+	if m.Level != 0 {
+		t["level"] = m.Level
+	}
 	for key, value := range m.Extra {
-		_, err = c.Set(value, fmt.Sprintf("_%s", key))
-		if err != nil {
-			return []byte{}, err
+		if _, ok := value.(bool); ok {
+			t[key] = fmt.Sprintf("%v", value)
+		} else {
+			t[key] = value
 		}
+	}
+
+	// Marshal the GELF message in order to get base JSON
+	jsonMessage, err := json.Marshal(t)
+	if err != nil {
+		return []byte{}, err
 	}
 
 	// Append the \n\0 sequence to the given message in order to indicate
 	// to graylog the end of the message
-	data := append(c.Bytes(), '\n', byte(0))
+	data := append(jsonMessage, '\n', byte(0))
 
 	return data, nil
 }
